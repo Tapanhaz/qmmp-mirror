@@ -1,0 +1,192 @@
+name: Qmmp Build Matrix
+
+on:
+  push:
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            arch: x86_64
+            qt_arch: linux_gcc_64
+            toolchain: ""
+            cmake_extra: >-
+              -DUSE_ALSA=ON -DUSE_PULSE=ON -DUSE_PIPEWIRE=ON -DUSE_JACK=ON
+              -DUSE_WAVEOUT=OFF -DUSE_DSOUND=OFF -DUSE_WASAPI=OFF -DUSE_PROJECTM=OFF
+          - os: ubuntu-26.04-arm
+            arch: aarch64
+            qt_arch: linux_gcc_arm64
+            toolchain: ""
+            cmake_extra: >-
+              -DUSE_ALSA=ON -DUSE_PULSE=ON -DUSE_PIPEWIRE=ON -DUSE_JACK=ON
+              -DUSE_WAVEOUT=OFF -DUSE_DSOUND=OFF -DUSE_WASAPI=OFF -DUSE_PROJECTM=OFF
+          #- os: windows-2025-vs2026
+          #  arch: AMD64
+          #  qt_arch: win64_msvc2022_64
+          #  cmake_generator: "Visual Studio 18 2026"
+          #  toolchain: "-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+          #  cmake_extra: >-
+          #    -DUSE_ALSA=OFF -DUSE_OSS=OFF -DUSE_JACK=OFF -DUSE_PULSE=OFF -DUSE_PIPEWIRE=OFF
+          #    -DUSE_WAVEOUT=ON -DUSE_DSOUND=ON -DUSE_WASAPI=ON -DUSE_SID=OFF
+          #    -DUSE_MPC=OFF -DUSE_BS2B=OFF -DUSE_ENCA=OFF
+          #- os: windows-11-vs2026-arm
+          #  arch: ARM64
+          #  qt_arch: win64_msvc2022_arm64
+          #  cmake_generator: "Visual Studio 18 2026"
+          #  toolchain: "-DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+          #  cmake_extra: >-
+          #    -DUSE_ALSA=OFF -DUSE_OSS=OFF -DUSE_JACK=OFF -DUSE_PULSE=OFF -DUSE_PIPEWIRE=OFF
+          #    -DUSE_WAVEOUT=ON -DUSE_DSOUND=ON -DUSE_WASAPI=ON -DUSE_SID=OFF
+          #    -DUSE_MPC=OFF -DUSE_BS2B=OFF -DUSE_ENCA=OFF
+          #- os: macos-15
+          #  arch: arm64
+          #  qt_arch: clang_64
+          #  toolchain: ""
+          #  cmake_extra: >-
+          #    -DUSE_ALSA=OFF -DUSE_OSS=OFF -DUSE_JACK=OFF -DUSE_PULSE=OFF -DUSE_PIPEWIRE=OFF
+          #    -DUSE_WAVEOUT=OFF -DUSE_DSOUND=OFF -DUSE_WASAPI=OFF -DUSE_SID=OFF
+          #- os: macos-15-intel
+          #  arch: x86_64
+          #  qt_arch: clang_64
+          #  toolchain: ""
+          #  cmake_extra: >-
+          #    -DUSE_ALSA=OFF -DUSE_OSS=OFF -DUSE_JACK=OFF -DUSE_PULSE=OFF -DUSE_PIPEWIRE=OFF
+          #    -DUSE_WAVEOUT=OFF -DUSE_DSOUND=OFF -DUSE_WASAPI=OFF -DUSE_SID=OFF
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config \
+            qt6-base-dev qt6-base-dev-tools qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            qt6-multimedia-dev \
+            tar unzip bzip2 gzip \
+            libmad0-dev libvorbis-dev libogg-dev \
+            libasound2-dev libtag1-dev libcurl4-openssl-dev \
+            libmpg123-dev libflac-dev libflac++-dev \
+            libmpcdec-dev libxmp-dev libsndfile1-dev libwavpack-dev \
+            libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev \
+            libfaad-dev libgme-dev libopus-dev libopusfile-dev \
+            libwildmidi-dev libsidplayfp-dev \
+            libcdio-dev libcdio-paranoia-dev libcddb2-dev \
+            libjack-jackd2-dev libpulse-dev libpipewire-0.3-dev \
+            libsoxr-dev libbs2b-dev libprojectm-dev \
+            libenca-dev libarchive-dev libshout3-dev \
+            libx11-dev libxcb1-dev x11proto-dev
+
+      - name: Install Qt (Windows)
+        if: startsWith(matrix.os, 'windows')
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Install Windows dependencies (vcpkg)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: |
+          $T = if ('${{ matrix.arch }}' -eq 'AMD64') { 'x64-windows' } else { 'arm64-windows' }
+          vcpkg install `
+            taglib:$T libmad:$T libvorbis:$T libogg:$T libflac:$T `
+            mpg123:$T libsndfile:$T wavpack:$T libmodplug:$T `
+            soxr:$T libxmp:$T ffmpeg:$T faad2:$T libgme:$T `
+            opus:$T opusfile:$T wildmidi:$T `
+            libarchive:$T curl:$T projectm:$T
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+
+      - name: Install macOS dependencies (Homebrew)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew update
+          brew install cmake pkgconf qt@6 \
+                       taglib ffmpeg libmad libvorbis libogg flac \
+                       mpg123 libsndfile wavpack libmodplug musepack libsoxr libxmp \
+                       libcdio libcddb game-music-emu libbs2b faad2 opus opusfile \
+                       wildmidi libarchive libshout enca projectm
+
+      - name: Configure CMake
+        shell: bash
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
+            ${{ matrix.toolchain }} \
+            ${{ matrix.cmake_extra }} \
+            ${{ matrix.cmake_generator && format('-G "{0}" -A {1}', matrix.cmake_generator, matrix.arch) || '' }}
+
+      - name: Set up Swap Space
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 4
+
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+
+      - name: Install
+        shell: bash
+        run: cmake --install build --prefix "${GITHUB_WORKSPACE}/install" --config Release
+
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qmmp-${{ matrix.os }}-${{ matrix.arch }}-full
+          path: install/
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -maxdepth 2 -type d | sort
+
+      - name: Package artifacts
+        run: |
+          mkdir -p release
+          cd artifacts
+          for d in */; do
+            name="${d%/}"
+            safe=$(echo "$name" | tr '/' '-')
+            zip -r "../release/${safe}.zip" "$name"
+          done
+          cd ..
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Qmmp build {0}', github.run_number) }}
+          body: |
+            Automated build of Qmmp (SVN trunk mirror).
+
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
+          files: release/*.zip
+          draft: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          generate_release_notes: false
